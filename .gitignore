@@ -1,0 +1,57 @@
+# Fichiers Python compilés
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Environnement virtuel
+venv/
+env/
+ENV/
+
+# Base de données SQLite
+*.sqlite3
+db.sqlite3
+
+# Fichiers média et statiques
+media/*
+!media/.gitkeep
+static/*
+!static/.gitkeep
+staticfiles/
+
+# Fichiers de modèle
+models/*
+!models/.gitkeep
+
+# Logs
+logs/*
+!logs/.gitkeep
+
+# Fichiers d'environnement
+.env
+.env.*
+!.env.example
+
+# Fichiers IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Fichiers système
+.DS_Store
+Thumbs.db
+
+# Fichiers de cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Fichiers temporaires
+tmp/
+temp/
