@@ -24,4 +24,4 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 EXPOSE 8000
 
-CMD ["gunicorn", "--workers=1", "--bind", "0.0.0.0:8000", "plum_project.wsgi:application"]
+CMD ["sh", "-c", "python manage.py migrate --noinput && gunicorn --workers=1 --bind 0.0.0.0:8000 plum_project.wsgi:application"]
