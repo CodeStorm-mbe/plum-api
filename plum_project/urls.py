@@ -33,7 +33,8 @@ urlpatterns = [
     path('api/', include('api.urls')),
     
     # Documentation Swagger/OpenAPI
-    path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
+    path("", schema_view.with_ui("swagger", cache_timeout=0), name="schema-swagger-ui"),  # Racine
+    path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui-alt'),
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
 ]
 
