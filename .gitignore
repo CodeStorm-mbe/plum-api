@@ -14,8 +14,8 @@ env/
 ENV/
 
 # Base de données SQLite
-*.sqlite3
-db.sqlite3
+# *.sqlite3
+# db.sqlite3
 
 # Fichiers média et statiques
 media/*
