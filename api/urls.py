@@ -13,8 +13,6 @@ router = DefaultRouter()
 router.register(r'classifications', PlumClassificationViewSet, basename='classification')
 router.register(r'batches', PlumBatchViewSet, basename='batch')
 router.register(r'models', ModelVersionViewSet, basename='model')
-router.register(r'users', UserViewSet, basename='user')
-router.register(r'farms', FarmViewSet, basename='farm')
 
 # Documentation Swagger/OpenAPI est configurée dans plum_project.urls
 
@@ -27,4 +25,5 @@ urlpatterns = [
     
     # Inclure les routes spécifiques au classificateur de prunes
     path('plum-classifier/', include('plum_classifier.urls')),
+    path('users/' ,include('users.urls'))
 ]
