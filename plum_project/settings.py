@@ -48,7 +48,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',  # For token blacklisting on logout
     'corsheaders',
-    'drf_yasg',
+    'drf_spectacular',
     
     # Custom apps
     'users',
@@ -202,7 +202,7 @@ REST_FRAMEWORK = {
         'anon': '100/day',
         'user': '1000/day'
     },
-    "DEFAULT_SCHEMA_CLASS": "rest_framework.schemas.coreapi.AutoSchema",
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
 
 # JWT settings
@@ -237,6 +237,23 @@ SWAGGER_SETTINGS = {
     },
     'USE_SESSION_AUTH': False,
 }
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': "API de Classification des Prunes",
+    'DESCRIPTION': "API pour la classification automatique des prunes destinée aux agriculteurs",
+    'VERSION': 'v1',
+    'TERMS_OF_SERVICE': "https://www.example.com/terms/",
+    'CONTACT': {
+        'name': "Support Technique",
+        'email': "contact@example.com",
+    },
+    'LICENSE': {
+        'name': "MIT License",
+        'url': "https://opensource.org/licenses/MIT",
+    },
+    'SERVE_INCLUDE_SCHEMA': False,  # Le schéma brut n'est pas affiché dans Swagger UI si False
+}
+
 
 # Email settings
 EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
