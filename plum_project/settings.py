@@ -203,6 +203,7 @@ REST_FRAMEWORK = {
         'user': '1000/day'
     },
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'EXCEPTION_HANDLER': 'rest_framework.views.exception_handler',
 }
 
 # JWT settings
