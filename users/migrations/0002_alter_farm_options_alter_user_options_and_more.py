@@ -55,13 +55,6 @@ class Migration(migrations.Migration):
         ),
         migrations.AlterField(
             model_name="farm",
-            name="id",
-            field=models.UUIDField(
-                default=uuid.uuid4, editable=False, primary_key=True, serialize=False
-            ),
-        ),
-        migrations.AlterField(
-            model_name="farm",
             name="location",
             field=models.CharField(max_length=255, verbose_name="emplacement"),
         ),
@@ -140,13 +133,6 @@ class Migration(migrations.Migration):
         ),
         migrations.AlterField(
             model_name="user",
-            name="id",
-            field=models.UUIDField(
-                default=uuid.uuid4, editable=False, primary_key=True, serialize=False
-            ),
-        ),
-        migrations.AlterField(
-            model_name="user",
             name="organization",
             field=models.CharField(
                 blank=True, max_length=100, null=True, verbose_name="organisation"
@@ -192,13 +178,6 @@ class Migration(migrations.Migration):
             model_name="usersettings",
             name="created_at",
             field=models.DateTimeField(auto_now_add=True, verbose_name="créé le"),
-        ),
-        migrations.AlterField(
-            model_name="usersettings",
-            name="id",
-            field=models.UUIDField(
-                default=uuid.uuid4, editable=False, primary_key=True, serialize=False
-            ),
         ),
         migrations.AlterField(
             model_name="usersettings",
