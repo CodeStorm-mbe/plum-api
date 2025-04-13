@@ -14,6 +14,7 @@ from pathlib import Path
 import os
 from datetime import timedelta
 from dotenv import load_dotenv
+import dj_database_url  # Ajout de l'importation
 
 # Load environment variables from .env file
 load_dotenv()
