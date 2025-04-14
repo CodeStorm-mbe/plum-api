@@ -72,7 +72,7 @@ class RegisterSerializer(serializers.ModelSerializer):
         
         # Create default user settings
         from users.models import UserSettings
-        UserSettings.objects.create(user=user)
+        UserSettings.objects.get_or_create(user=user)
         
         return user
 
