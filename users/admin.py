@@ -1,89 +1,82 @@
 from django.contrib import admin
-from django.utils.translation import gettext_lazy as _
-from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.utils.html import format_html
+from django.urls import reverse
+from django.db.models import Avg, Count
+
 from .models import User, Farm, UserSettings
 
-
 @admin.register(User)
-class UserAdmin(BaseUserAdmin):
-    """
-    Configuration de l'interface d'administration pour le modèle User personnalisé.
-    """
-    list_display = ('username', 'email', 'first_name', 'last_name', 'role', 'email_verified', 'is_staff')
-    list_filter = ('role', 'email_verified', 'is_staff', 'is_active', 'created_at')
-    search_fields = ('username', 'email', 'first_name', 'last_name', 'organization')
-    ordering = ('-created_at',)
-    readonly_fields = ('created_at', 'updated_at', 'last_login_ip')
-    
+class UserAdmin(admin.ModelAdmin):
+    list_display = ('username', 'email', 'first_name', 'last_name', 'role', 'email_verified', 'is_active', 'created_at')
+    list_filter = ('role', 'email_verified', 'is_active', 'created_at')
+    search_fields = ('username', 'email', 'first_name', 'last_name')
+    readonly_fields = ('created_at', 'updated_at')
     fieldsets = (
-        (None, {'fields': ('username', 'password')}),
-        (_('Informations personnelles'), {'fields': ('email', 'first_name', 'last_name', 'profile_image')}),
-        (_('Rôle et organisation'), {'fields': ('role', 'organization', 'address', 'phone_number')}),
-        (_('Vérification'), {'fields': ('email_verified', 'email_verification_token', 'email_verification_sent_at')}),
-        (_('Permissions'), {
-            'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions'),
+        ('Informations personnelles', {
+            'fields': ('username', 'email', 'first_name', 'last_name', 'password')
         }),
-        (_('Dates importantes'), {'fields': ('last_login', 'created_at', 'updated_at', 'last_login_ip')}),
+        ('Permissions', {
+            'fields': ('role', 'is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')
+        }),
+        ('Vérification d\'email', {
+            'fields': ('email_verified', 'email_verification_token', 'email_verification_sent_at')
+        }),
+        ('Informations supplémentaires', {
+            'fields': ('phone_number', 'profile_image', 'organization', 'address')
+        }),
+        ('Dates importantes', {
+            'fields': ('last_login', 'created_at', 'updated_at')
+        }),
     )
+    actions = ['verify_email', 'activate_users', 'deactivate_users']
     
-    add_fieldsets = (
-        (None, {
-            'classes': ('wide',),
-            'fields': ('username', 'email', 'password1', 'password2', 'role'),
-        }),
-    )
+    def verify_email(self, request, queryset):
+        updated = queryset.update(email_verified=True)
+        self.message_user(request, f"{updated} utilisateur(s) ont été vérifiés.")
+    verify_email.short_description = "Marquer les emails comme vérifiés"
+    
+    def activate_users(self, request, queryset):
+        updated = queryset.update(is_active=True)
+        self.message_user(request, f"{updated} utilisateur(s) ont été activés.")
+    activate_users.short_description = "Activer les utilisateurs sélectionnés"
+    
+    def deactivate_users(self, request, queryset):
+        updated = queryset.update(is_active=False)
+        self.message_user(request, f"{updated} utilisateur(s) ont été désactivés.")
+    deactivate_users.short_description = "Désactiver les utilisateurs sélectionnés"
 
 
 @admin.register(Farm)
 class FarmAdmin(admin.ModelAdmin):
-    """
-    Configuration de l'interface d'administration pour le modèle Farm.
-    """
-    list_display = ('name', 'owner', 'location', 'size', 'created_at')
+    list_display = ('name', 'location', 'owner_link', 'size', 'created_at')
     list_filter = ('created_at',)
-    search_fields = ('name', 'location', 'owner__username', 'owner__email')
-    ordering = ('-created_at',)
+    search_fields = ('name', 'location', 'owner__username')
     readonly_fields = ('created_at', 'updated_at')
     
-    fieldsets = (
-        (None, {'fields': ('name', 'owner', 'description')}),
-        (_('Localisation'), {'fields': ('location', 'latitude', 'longitude')}),
-        (_('Détails'), {'fields': ('size',)}),
-        (_('Dates'), {'fields': ('created_at', 'updated_at')}),
-    )
+    def owner_link(self, obj):
+        url = reverse("admin:users_user_change", args=[obj.owner.id])
+        return format_html('<a href="{}">{}</a>', url, obj.owner.username)
+    owner_link.short_description = 'Propriétaire'
     
     def get_queryset(self, request):
-        """
-        Limite les fermes affichées aux administrateurs et aux propriétaires.
-        """
-        qs = super().get_queryset(request)
-        if request.user.is_superuser or request.user.is_staff or request.user.is_admin_user:
-            return qs
-        return qs.filter(owner=request.user)
+        queryset = super().get_queryset(request)
+        queryset = queryset.select_related('owner')
+        return queryset
 
 
 @admin.register(UserSettings)
 class UserSettingsAdmin(admin.ModelAdmin):
-    """
-    Configuration de l'interface d'administration pour le modèle UserSettings.
-    """
-    list_display = ('user', 'language', 'created_at', 'updated_at')
+    list_display = ('user_link', 'language', 'created_at', 'updated_at')
     list_filter = ('language', 'created_at')
     search_fields = ('user__username', 'user__email')
-    ordering = ('-created_at',)
     readonly_fields = ('created_at', 'updated_at')
     
-    fieldsets = (
-        (None, {'fields': ('user',)}),
-        (_('Préférences'), {'fields': ('language', 'notification_preferences', 'ui_preferences')}),
-        (_('Dates'), {'fields': ('created_at', 'updated_at')}),
-    )
+    def user_link(self, obj):
+        url = reverse("admin:users_user_change", args=[obj.user.id])
+        return format_html('<a href="{}">{}</a>', url, obj.user.username)
+    user_link.short_description = 'Utilisateur'
     
     def get_queryset(self, request):
-        """
-        Limite les paramètres affichés aux administrateurs et aux propriétaires.
-        """
-        qs = super().get_queryset(request)
-        if request.user.is_superuser or request.user.is_staff or request.user.is_admin_user:
-            return qs
-        return qs.filter(user=request.user)
+        queryset = super().get_queryset(request)
+        queryset = queryset.select_related('user')
+        return queryset

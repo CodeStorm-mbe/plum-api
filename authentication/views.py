@@ -30,7 +30,7 @@ class RegisterView(generics.CreateAPIView):
     API view for user registration with email verification.
     """
     queryset = User.objects.all()
-    permission_classes = (permissions.AllowAny,)
+    permission_classes = [permissions.AllowAny]
     serializer_class = RegisterSerializer
     
     def create(self, request, *args, **kwargs):

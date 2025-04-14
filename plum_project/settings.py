@@ -100,9 +100,16 @@ WSGI_APPLICATION = 'plum_project.wsgi.application'
 #         }
 #     }
 # else:
+# DATABASES = {
+#     "default": dj_database_url.config(default=os.environ.get("DATABASE_URL"))
+# }
+
 DATABASES = {
-    "default": dj_database_url.config(default=os.environ.get("DATABASE_URL"))
+    'default': dj_database_url.parse(
+        " postgresql://plum_user:4dEQpEcvQBqaDvqkEuTZt7eAub0Gx1CE@dpg-cvtrm9adbo4c7399t45g-a.frankfurt-postgres.render.com/plum_db_y85q"
+    )
 }
+
 
 # Cache configuration
 # CACHES = {
