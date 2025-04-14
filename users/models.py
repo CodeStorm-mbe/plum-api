@@ -59,7 +59,7 @@ class User(AbstractUser):
         ADMIN = 'admin', _('Administrateur')
     
     # Champs de base
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')
     email = models.EmailField(_('adresse email'), unique=True)
     role = models.CharField(
         _('rôle'), 
@@ -170,7 +170,7 @@ class Farm(models.Model):
     """
     Modèle représentant une ferme appartenant à un utilisateur.
     """
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')
     name = models.CharField(_('nom'), max_length=100)
     location = models.CharField(_('emplacement'), max_length=255)
     size = models.DecimalField(
@@ -238,7 +238,7 @@ class UserSettings(models.Model):
     """
     Modèle pour stocker les préférences de l'utilisateur.
     """
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL, 
         on_delete=models.CASCADE, 
