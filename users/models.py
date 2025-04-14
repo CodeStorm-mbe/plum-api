@@ -26,7 +26,7 @@ class UserManager(BaseUserManager):
         user.save(using=self._db)
         
         # Créer les paramètres utilisateur par défaut
-        UserSettings.objects.create(user=user)
+        # UserSettings.objects.create(user=user)
         
         return user
 

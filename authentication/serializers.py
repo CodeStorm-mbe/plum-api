@@ -70,6 +70,10 @@ class RegisterSerializer(serializers.ModelSerializer):
         user.email_verification_sent_at = timezone.now()
         user.save()
         
+        # Create default user settings
+        from users.models import UserSettings
+        UserSettings.objects.create(user=user)
+        
         return user
 
 
