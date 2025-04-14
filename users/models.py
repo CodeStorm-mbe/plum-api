@@ -140,9 +140,12 @@ class User(AbstractUser):
         return self.role == self.CONSULTANT
 
 
+# Note: Le modèle EmailVerificationToken n'est plus utilisé car les tokens sont maintenant gérés par JWT
+# Il est conservé pour la compatibilité avec les migrations existantes mais sera déprécié dans une future version
 class EmailVerificationToken(models.Model):
     """
     Modèle pour stocker les tokens de vérification d'email.
+    DÉPRÉCIÉ: Ce modèle n'est plus utilisé car les tokens sont maintenant gérés par JWT.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='email_tokens')

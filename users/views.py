@@ -19,7 +19,7 @@ from .serializers import (
     PasswordResetRequestSerializer,
     PasswordResetConfirmSerializer
 )
-from .models import EmailVerificationToken, PasswordResetToken
+from .models import PasswordResetToken
 from .services import EmailService
 
 User = get_user_model()
@@ -51,27 +51,23 @@ class VerifyEmailView(APIView):
     def post(self, request):
         serializer = VerifyEmailSerializer(data=request.data)
         if serializer.is_valid():
-            token_value = serializer.validated_data['token']
+            token = serializer.validated_data['token']
             
-            try:
-                token = EmailVerificationToken.objects.get(token=token_value)
-                user = token.user
-                
+            # Utiliser le service pour vérifier le token JWT
+            user = EmailService.verify_email_token(token)
+            
+            if user:
                 # Marquer l'email comme vérifié
                 user.email_verified = True
                 user.save()
-                
-                # Marquer le token comme utilisé
-                token.is_used = True
-                token.save()
                 
                 return Response(
                     {"detail": _("Email vérifié avec succès.")},
                     status=status.HTTP_200_OK
                 )
-            except EmailVerificationToken.DoesNotExist:
+            else:
                 return Response(
-                    {"detail": _("Token invalide.")},
+                    {"detail": _("Token invalide ou expiré.")},
                     status=status.HTTP_400_BAD_REQUEST
                 )
         
@@ -102,18 +98,8 @@ class ResendVerificationEmailView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Créer un nouveau token
-            token = EmailVerificationToken.objects.create(
-                user=user,
-                token=uuid.uuid4(),
-                expires_at=timezone.now() + timezone.timedelta(days=1)
-            )
-            
-            # Construire l'URL de vérification
-            verification_url = f"/api/users/verify-email/{token.token}/"
-            
-            # Envoyer l'email de vérification
-            EmailService.send_verification_email(user, verification_url)
+            # Envoyer l'email de vérification avec le nouveau service
+            EmailService.send_verification_email(user)
             
             return Response(
                 {"detail": _("Email de vérification envoyé.")},

@@ -4,6 +4,8 @@ Configuration du système d'emails pour l'application.
 
 import os
 import logging
+import jwt
+from datetime import datetime, timedelta
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.utils.html import strip_tags
@@ -66,17 +68,66 @@ class EmailService:
             return False
     
     @classmethod
-    def send_verification_email(cls, user, verification_url):
+    def generate_verification_token(cls, user):
         """
-        Envoie un email de vérification.
+        Génère un token JWT pour la vérification d'email.
         
         Args:
             user: Instance de l'utilisateur
-            verification_url: URL de vérification
+            
+        Returns:
+            str: Token JWT
+        """
+        payload = {
+            'user_id': str(user.id),
+            'exp': datetime.utcnow() + timedelta(hours=24),
+            'iat': datetime.utcnow(),
+            'type': 'email_verification'
+        }
+        token = jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm='HS256')
+        return token
+    
+    @classmethod
+    def verify_email_token(cls, token):
+        """
+        Vérifie un token JWT de vérification d'email.
+        
+        Args:
+            token: Token JWT à vérifier
+            
+        Returns:
+            User: Instance de l'utilisateur si le token est valide, None sinon
+        """
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        
+        try:
+            payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=['HS256'])
+            if payload['type'] != 'email_verification':
+                return None
+            user = User.objects.get(id=payload['user_id'])
+            return user
+        except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, User.DoesNotExist):
+            return None
+    
+    @classmethod
+    def send_verification_email(cls, user):
+        """
+        Envoie un email de vérification avec un lien vers le frontend.
+        
+        Args:
+            user: Instance de l'utilisateur
             
         Returns:
             bool: True si l'email a été envoyé avec succès, False sinon
         """
+        # Générer un token JWT
+        token = cls.generate_verification_token(user)
+        
+        # Construire l'URL de vérification qui pointe vers le frontend
+        frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+        verification_url = f"{frontend_url}/verify-email/{token}"
+        
         subject = "Vérification de votre adresse email"
         context = {
             'user': user,

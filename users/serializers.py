@@ -9,9 +9,7 @@ from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.utils import timezone
 from datetime import timedelta
-import uuid
 
-from users.models import EmailVerificationToken
 from users.services import EmailService
 
 User = get_user_model()
@@ -111,18 +109,9 @@ class RegisterSerializer(serializers.ModelSerializer):
         user.set_password(validated_data['password'])
         user.save()
         
-        # Créer un token de vérification d'email
-        token = EmailVerificationToken.objects.create(
-            user=user,
-            token=uuid.uuid4(),
-            expires_at=timezone.now() + timedelta(days=1)
-        )
-        
-        # Construire l'URL de vérification (à adapter selon l'environnement)
-        verification_url = f"/api/users/verify-email/{token.token}/"
-        
-        # Envoyer l'email de vérification
-        EmailService.send_verification_email(user, verification_url)
+        # Envoyer l'email de vérification avec le nouveau service
+        # qui génère un token JWT et construit l'URL vers le frontend
+        EmailService.send_verification_email(user)
         
         return user
 
@@ -131,22 +120,16 @@ class VerifyEmailSerializer(serializers.Serializer):
     """
     Sérialiseur pour la vérification d'email.
     """
-    token = serializers.UUIDField(required=True)
+    token = serializers.CharField(required=True)
     
     def validate_token(self, value):
         """
-        Vérifie que le token existe, n'est pas expiré et n'a pas déjà été utilisé.
+        Vérifie que le token JWT est valide.
         """
-        try:
-            token = EmailVerificationToken.objects.get(token=value)
-        except EmailVerificationToken.DoesNotExist:
-            raise serializers.ValidationError(_("Token invalide."))
-        
-        if token.is_expired:
-            raise serializers.ValidationError(_("Token expiré."))
-        
-        if token.is_used:
-            raise serializers.ValidationError(_("Token déjà utilisé."))
+        # La validation du token JWT est gérée par le service EmailService
+        # dans la vue, donc nous faisons juste une validation minimale ici
+        if not value or len(value) < 10:  # Vérification basique que le token a une longueur minimale
+            raise serializers.ValidationError(_("Format de token invalide."))
         
         return value
 
