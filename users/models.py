@@ -1,199 +1,309 @@
-"""
-Modèles de données pour l'application users.
-"""
-
-import uuid
 from django.db import models
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.utils.translation import gettext_lazy as _
+from django.utils.crypto import get_random_string
+from django.conf import settings
+from django.utils import timezone
+import uuid
 
 
 class UserManager(BaseUserManager):
     """
-    Gestionnaire personnalisé pour le modèle User.
+    Manager personnalisé pour le modèle User avec support amélioré pour l'email.
     """
-    def create_user(self, email, password=None, **extra_fields):
+    def create_user(self, username, email, password=None, **extra_fields):
         """
-        Crée et enregistre un utilisateur avec l'email et le mot de passe donnés.
+        Crée et sauvegarde un utilisateur avec l'email et le mot de passe donnés.
         """
         if not email:
             raise ValueError(_('L\'adresse email est obligatoire'))
+        if not username:
+            raise ValueError(_('Le nom d\'utilisateur est obligatoire'))
+        
         email = self.normalize_email(email)
-        user = self.model(email=email, **extra_fields)
+        user = self.model(username=username, email=email, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
+        
+        # Créer les paramètres utilisateur par défaut
+        UserSettings.objects.create(user=user)
+        
         return user
 
-    def create_superuser(self, email, password=None, **extra_fields):
+    def create_superuser(self, username, email, password=None, **extra_fields):
         """
-        Crée et enregistre un superutilisateur avec l'email et le mot de passe donnés.
+        Crée et sauvegarde un superutilisateur avec l'email et le mot de passe donnés.
         """
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
         extra_fields.setdefault('is_active', True)
-        extra_fields.setdefault('role', User.ADMIN)
+        extra_fields.setdefault('role', 'admin')
+        extra_fields.setdefault('email_verified', True)
         
         if extra_fields.get('is_staff') is not True:
             raise ValueError(_('Le superutilisateur doit avoir is_staff=True.'))
         if extra_fields.get('is_superuser') is not True:
             raise ValueError(_('Le superutilisateur doit avoir is_superuser=True.'))
         
-        return self.create_user(email, password, **extra_fields)
+        return self.create_user(username, email, password, **extra_fields)
 
 
 class User(AbstractUser):
     """
-    Modèle utilisateur personnalisé avec UUID comme identifiant et gestion des rôles.
+    Modèle utilisateur personnalisé avec des champs supplémentaires pour le système de classification des prunes.
+    Utilise l'email comme identifiant unique et ajoute des rôles spécifiques.
     """
-    # Rôles disponibles
-    ADMIN = 'admin'
-    AGRICULTEUR = 'agriculteur'
-    TECHNICIEN = 'technicien'
-    CONSULTANT = 'consultant'
+    class Roles(models.TextChoices):
+        FARMER = 'farmer', _('Agriculteur')
+        TECHNICIAN = 'technician', _('Technicien')
+        ADMIN = 'admin', _('Administrateur')
     
-    ROLE_CHOICES = [
-        (ADMIN, _('Administrateur')),
-        (AGRICULTEUR, _('Agriculteur')),
-        (TECHNICIEN, _('Technicien')),
-        (CONSULTANT, _('Consultant')),
-    ]
-    
-    # Remplacer l'ID par un UUID
+    # Champs de base
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    
-    # Remplacer le nom d'utilisateur par l'email
-    username = None
     email = models.EmailField(_('adresse email'), unique=True)
-    
-    # Champs supplémentaires
-    role = models.CharField(_('rôle'), max_length=20, choices=ROLE_CHOICES, default=AGRICULTEUR)
+    role = models.CharField(
+        _('rôle'), 
+        max_length=20, 
+        choices=Roles.choices, 
+        default=Roles.FARMER
+    )
     phone_number = models.CharField(_('numéro de téléphone'), max_length=20, blank=True, null=True)
-    address = models.TextField(_('adresse'), blank=True, null=True)
-    profile_picture = models.ImageField(_('photo de profil'), upload_to='profile_pictures/', blank=True, null=True)
+    profile_image = models.ImageField(
+        _('image de profil'), 
+        upload_to='profile_images/', 
+        blank=True, 
+        null=True
+    )
     
-    # Champs pour la vérification de l'email
+    # Vérification de l'email
     email_verified = models.BooleanField(_('email vérifié'), default=False)
+    email_verification_token = models.CharField(
+        _('jeton de vérification email'), 
+        max_length=100, 
+        blank=True, 
+        null=True,
+        db_index=True  # Indexé pour des recherches plus rapides
+    )
+    email_verification_sent_at = models.DateTimeField(
+        _('date d\'envoi de la vérification email'), 
+        blank=True, 
+        null=True
+    )
     
-    # Préférences de notification
-    notification_email = models.BooleanField(_('notifications par email'), default=True)
-    notification_classification = models.BooleanField(_('notifications de classification'), default=True)
-    notification_reports = models.BooleanField(_('notifications de rapports'), default=True)
+    # Champs supplémentaires pour les agriculteurs
+    organization = models.CharField(_('organisation'), max_length=100, blank=True, null=True)
+    address = models.TextField(_('adresse'), blank=True, null=True)
     
-    # Métadonnées
-    created_at = models.DateTimeField(_('date de création'), auto_now_add=True)
-    updated_at = models.DateTimeField(_('date de mise à jour'), auto_now=True)
+    # Horodatage
+    created_at = models.DateTimeField(_('créé le'), auto_now_add=True)
+    updated_at = models.DateTimeField(_('mis à jour le'), auto_now=True)
+    last_login_ip = models.GenericIPAddressField(_('dernière IP de connexion'), blank=True, null=True)
     
-    # Spécifier les champs requis
-    USERNAME_FIELD = 'email'
-    REQUIRED_FIELDS = []
-    
-    # Utiliser le gestionnaire personnalisé
+    # Configuration
     objects = UserManager()
+    EMAIL_FIELD = 'email'
+    USERNAME_FIELD = 'username'
+    REQUIRED_FIELDS = ['email']
     
     class Meta:
         verbose_name = _('utilisateur')
         verbose_name_plural = _('utilisateurs')
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['email']),
+            models.Index(fields=['role']),
+            models.Index(fields=['email_verified']),
+        ]
     
     def __str__(self):
-        return self.email
+        return f"{self.username} ({self.email})"
     
-    def get_full_name(self):
-        """
-        Retourne le prénom et le nom avec un espace au milieu.
-        """
-        full_name = f"{self.first_name} {self.last_name}"
-        return full_name.strip()
-    
-    def get_short_name(self):
-        """
-        Retourne le prénom de l'utilisateur.
-        """
-        return self.first_name
+    def clean(self):
+        super().clean()
+        self.email = self.__class__.objects.normalize_email(self.email)
     
     @property
-    def is_admin(self):
-        """
-        Vérifie si l'utilisateur est un administrateur.
-        """
-        return self.role == self.ADMIN
+    def is_farmer(self):
+        """Vérifie si l'utilisateur est un agriculteur."""
+        return self.role == self.Roles.FARMER
     
     @property
-    def is_agriculteur(self):
-        """
-        Vérifie si l'utilisateur est un agriculteur.
-        """
-        return self.role == self.AGRICULTEUR
+    def is_technician(self):
+        """Vérifie si l'utilisateur est un technicien."""
+        return self.role == self.Roles.TECHNICIAN
     
     @property
-    def is_technicien(self):
-        """
-        Vérifie si l'utilisateur est un technicien.
-        """
-        return self.role == self.TECHNICIEN
+    def is_admin_user(self):
+        """Vérifie si l'utilisateur est un administrateur."""
+        return self.role == self.Roles.ADMIN
     
     @property
-    def is_consultant(self):
-        """
-        Vérifie si l'utilisateur est un consultant.
-        """
-        return self.role == self.CONSULTANT
+    def full_name(self):
+        """Retourne le nom complet de l'utilisateur."""
+        if self.first_name and self.last_name:
+            return f"{self.first_name} {self.last_name}"
+        return self.username
+    
+    def generate_email_verification_token(self):
+        """Génère un jeton aléatoire pour la vérification de l'email."""
+        self.email_verification_token = get_random_string(64)
+        self.email_verification_sent_at = timezone.now()
+        self.save(update_fields=['email_verification_token', 'email_verification_sent_at'])
+        return self.email_verification_token
+    
+    def verify_email(self):
+        """Marque l'email comme vérifié et efface le jeton."""
+        self.email_verified = True
+        self.email_verification_token = None
+        self.save(update_fields=['email_verified', 'email_verification_token'])
+    
+    def token_is_valid(self, max_age_hours=48):
+        """Vérifie si le jeton de vérification d'email est encore valide."""
+        if not self.email_verification_token or not self.email_verification_sent_at:
+            return False
+        
+        expiration_time = self.email_verification_sent_at + timezone.timedelta(hours=max_age_hours)
+        return timezone.now() <= expiration_time
 
 
-# Note: Le modèle EmailVerificationToken n'est plus utilisé car les tokens sont maintenant gérés par JWT
-# Il est conservé pour la compatibilité avec les migrations existantes mais sera déprécié dans une future version
-class EmailVerificationToken(models.Model):
+class Farm(models.Model):
     """
-    Modèle pour stocker les tokens de vérification d'email.
-    DÉPRÉCIÉ: Ce modèle n'est plus utilisé car les tokens sont maintenant gérés par JWT.
+    Modèle représentant une ferme appartenant à un utilisateur.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='email_tokens')
-    token = models.UUIDField(_('token'), default=uuid.uuid4, editable=False)
-    created_at = models.DateTimeField(_('date de création'), auto_now_add=True)
-    expires_at = models.DateTimeField(_('date d\'expiration'))
-    is_used = models.BooleanField(_('utilisé'), default=False)
+    name = models.CharField(_('nom'), max_length=100)
+    location = models.CharField(_('emplacement'), max_length=255)
+    size = models.DecimalField(
+        _('taille (hectares)'), 
+        max_digits=10, 
+        decimal_places=2, 
+        blank=True, 
+        null=True
+    )
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.CASCADE, 
+        related_name='farms',
+        verbose_name=_('propriétaire')
+    )
+    description = models.TextField(_('description'), blank=True, null=True)
+    
+    # Coordonnées pour l'affichage sur la carte
+    latitude = models.DecimalField(
+        _('latitude'), 
+        max_digits=9, 
+        decimal_places=6, 
+        blank=True, 
+        null=True
+    )
+    longitude = models.DecimalField(
+        _('longitude'), 
+        max_digits=9, 
+        decimal_places=6, 
+        blank=True, 
+        null=True
+    )
+    
+    # Horodatage
+    created_at = models.DateTimeField(_('créé le'), auto_now_add=True)
+    updated_at = models.DateTimeField(_('mis à jour le'), auto_now=True)
     
     class Meta:
-        verbose_name = _('token de vérification d\'email')
-        verbose_name_plural = _('tokens de vérification d\'email')
+        verbose_name = _('ferme')
+        verbose_name_plural = _('fermes')
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['owner']),
+            models.Index(fields=['name']),
+            models.Index(fields=['created_at']),
+        ]
     
     def __str__(self):
-        return f"Token pour {self.user.email}"
+        return f"{self.name} ({self.owner.username})"
     
     @property
-    def is_expired(self):
-        """
-        Vérifie si le token est expiré.
-        """
-        from django.utils import timezone
-        return self.expires_at < timezone.now()
+    def coordinates(self):
+        """Retourne les coordonnées de la ferme sous forme de tuple (latitude, longitude)."""
+        if self.latitude is not None and self.longitude is not None:
+            return (float(self.latitude), float(self.longitude))
+        return None
+    
+    @property
+    def has_location_data(self):
+        """Vérifie si la ferme a des données de localisation."""
+        return self.latitude is not None and self.longitude is not None
 
 
-class PasswordResetToken(models.Model):
+class UserSettings(models.Model):
     """
-    Modèle pour stocker les tokens de réinitialisation de mot de passe.
+    Modèle pour stocker les préférences de l'utilisateur.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='password_tokens')
-    token = models.UUIDField(_('token'), default=uuid.uuid4, editable=False)
-    created_at = models.DateTimeField(_('date de création'), auto_now_add=True)
-    expires_at = models.DateTimeField(_('date d\'expiration'))
-    is_used = models.BooleanField(_('utilisé'), default=False)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, 
+        on_delete=models.CASCADE, 
+        related_name='settings',
+        verbose_name=_('utilisateur')
+    )
+    notification_preferences = models.JSONField(
+        _('préférences de notification'), 
+        default=dict,
+        help_text=_('Préférences pour les notifications par email, SMS, etc.')
+    )
+    ui_preferences = models.JSONField(
+        _('préférences d\'interface'), 
+        default=dict,
+        help_text=_('Préférences pour l\'interface utilisateur')
+    )
+    language = models.CharField(
+        _('langue'), 
+        max_length=10, 
+        default='fr',
+        choices=[
+            ('fr', _('Français')),
+            ('en', _('Anglais')),
+            ('es', _('Espagnol')),
+        ]
+    )
+    
+    # Horodatage
+    created_at = models.DateTimeField(_('créé le'), auto_now_add=True)
+    updated_at = models.DateTimeField(_('mis à jour le'), auto_now=True)
     
     class Meta:
-        verbose_name = _('token de réinitialisation de mot de passe')
-        verbose_name_plural = _('tokens de réinitialisation de mot de passe')
-        ordering = ['-created_at']
+        verbose_name = _('paramètres utilisateur')
+        verbose_name_plural = _('paramètres utilisateurs')
+        indexes = [
+            models.Index(fields=['user']),
+        ]
     
     def __str__(self):
-        return f"Token pour {self.user.email}"
+        return f"Paramètres de {self.user.username}"
     
     @property
-    def is_expired(self):
-        """
-        Vérifie si le token est expiré.
-        """
-        from django.utils import timezone
-        return self.expires_at < timezone.now()
+    def default_notification_preferences(self):
+        """Retourne les préférences de notification par défaut."""
+        return {
+            'email': True,
+            'push': True,
+            'sms': False,
+        }
+    
+    @property
+    def default_ui_preferences(self):
+        """Retourne les préférences d'interface par défaut."""
+        return {
+            'theme': 'light',
+            'dashboard_layout': 'grid',
+            'items_per_page': 10,
+        }
+    
+    def save(self, *args, **kwargs):
+        """Assure que les préférences par défaut sont définies."""
+        if not self.notification_preferences:
+            self.notification_preferences = self.default_notification_preferences
+        
+        if not self.ui_preferences:
+            self.ui_preferences = self.default_ui_preferences
+            
+        super().save(*args, **kwargs)

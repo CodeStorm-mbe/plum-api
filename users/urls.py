@@ -1,32 +1,24 @@
-"""
-Configuration des URLs pour l'application users.
-"""
-
 from django.urls import path
-from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views import (
-    CustomTokenObtainPairView,
-    RegisterView,
-    VerifyEmailView,
-    ResendVerificationEmailView,
-    PasswordResetRequestView,
-    PasswordResetConfirmView
+    UserList, UserDetail, UserProfile, UserSettingsView, user_stats,
+    FarmList, FarmDetail, farm_stats, farm_batches, farms_nearby
 )
 
 app_name = 'users'
 
 urlpatterns = [
-    # Authentification JWT
-    path('token/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    # Routes utilisateurs
+    path('users/', UserList.as_view(), name='user-list'),
+    path('users/<int:pk>/', UserDetail.as_view(), name='user-detail'),
+    path('users/me/', UserProfile.as_view(), name='user-profile'),
+    path('users/settings/', UserSettingsView.as_view(), name='user-settings'),
+    path('users/stats/', user_stats, name='user-stats'),
     
-    # Inscription et vérification d'email
-    path('register/', RegisterView.as_view(), name='register'),
-    path('verify-email/', VerifyEmailView.as_view(), name='verify_email'),
-    path('resend-verification-email/', ResendVerificationEmailView.as_view(), name='resend_verification_email'),
-    
-    # Réinitialisation de mot de passe
-    path('password-reset-request/', PasswordResetRequestView.as_view(), name='password_reset_request'),
-    path('password-reset-confirm/', PasswordResetConfirmView.as_view(), name='password_reset_confirm'),
+    # Routes fermes
+    path('farms/', FarmList.as_view(), name='farm-list'),
+    path('farms/<int:pk>/', FarmDetail.as_view(), name='farm-detail'),
+    path('farms/<int:pk>/stats/', farm_stats, name='farm-stats'),
+    path('farms/<int:pk>/batches/', farm_batches, name='farm-batches'),
+    path('farms/nearby/', farms_nearby, name='farms-nearby'),
 ]

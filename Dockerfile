@@ -15,7 +15,7 @@ COPY . .
 
 RUN mkdir -p /app/media /app/static /app/staticfiles /app/logs /app/models
 
-ENV DJANGO_SETTINGS_MODULE=plum_api.settings
+ENV DJANGO_SETTINGS_MODULE=plum_project.settings
 RUN python manage.py collectstatic --noinput
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -24,4 +24,4 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "python manage.py migrate --noinput && gunicorn --workers=1 --bind 0.0.0.0:8000 plum_api.wsgi:application"]
+CMD ["sh", "-c", "python manage.py migrate --noinput && gunicorn --workers=1 --bind 0.0.0.0:8000 plum_project.wsgi:application"]

@@ -1,28 +1,30 @@
-"""
-Configuration des URLs pour l'application api.
-"""
-
 from django.urls import path, include
-from rest_framework.routers import DefaultRouter
 
-from .views import (
-    ApiKeyViewSet,
-    ApiLogViewSet,
-    NotificationViewSet,
-    FeedbackViewSet,
-    DashboardViewSet
+from plum_classifier.views import (
+    PlumClassificationViewSet,
+    PlumBatchViewSet,
+    ModelVersionViewSet
 )
 
-app_name = 'api'
-
-# Créer un routeur pour les ViewSets
-router = DefaultRouter()
-router.register(r'api-keys', ApiKeyViewSet, basename='api_key')
-router.register(r'api-logs', ApiLogViewSet, basename='api_log')
-router.register(r'notifications', NotificationViewSet, basename='notification')
-router.register(r'feedbacks', FeedbackViewSet, basename='feedback')
-router.register(r'dashboard', DashboardViewSet, basename='dashboard')
+# Documentation Swagger/OpenAPI est configurée dans plum_project.urls
 
 urlpatterns = [
-    path('', include(router.urls)),
+    # Inclure les routes du classificateur de prunes
+    path('classifications/', PlumClassificationViewSet.as_view({'get': 'list', 'post': 'create'}), name='classification-list'),
+    path('classifications/<int:pk>/', PlumClassificationViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='classification-detail'),
+    
+    path('batches/', PlumBatchViewSet.as_view({'get': 'list', 'post': 'create'}), name='batch-list'),
+    path('batches/<int:pk>/', PlumBatchViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='batch-detail'),
+    
+    path('models/', ModelVersionViewSet.as_view({'get': 'list', 'post': 'create'}), name='model-list'),
+    path('models/<int:pk>/', ModelVersionViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='model-detail'),
+    
+    # Inclure les routes d'authentification
+    path('auth/', include('authentication.urls')),
+    
+    # Inclure les routes spécifiques au classificateur de prunes
+    path('plum-classifier/', include('plum_classifier.urls')),
+    
+    # Inclure les routes utilisateurs
+    path('', include('users.urls')),
 ]
