@@ -1,16 +1,32 @@
-from django.urls import path, include
-from rest_framework.routers import DefaultRouter
+"""
+Configuration des URLs pour l'application users.
+"""
 
-from .views import UserViewSet, FarmViewSet
+from django.urls import path
+from rest_framework_simplejwt.views import TokenRefreshView
 
-# Créer un routeur pour les ViewSets
-router = DefaultRouter()
-router.register(r'users', UserViewSet, basename='user')
-router.register(r'farms', FarmViewSet, basename='farm')
+from .views import (
+    CustomTokenObtainPairView,
+    RegisterView,
+    VerifyEmailView,
+    ResendVerificationEmailView,
+    PasswordResetRequestView,
+    PasswordResetConfirmView
+)
 
 app_name = 'users'
 
 urlpatterns = [
-    # Inclure les routes générées automatiquement
-    path('', include(router.urls)),
+    # Authentification JWT
+    path('token/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    
+    # Inscription et vérification d'email
+    path('register/', RegisterView.as_view(), name='register'),
+    path('verify-email/', VerifyEmailView.as_view(), name='verify_email'),
+    path('resend-verification-email/', ResendVerificationEmailView.as_view(), name='resend_verification_email'),
+    
+    # Réinitialisation de mot de passe
+    path('password-reset-request/', PasswordResetRequestView.as_view(), name='password_reset_request'),
+    path('password-reset-confirm/', PasswordResetConfirmView.as_view(), name='password_reset_confirm'),
 ]

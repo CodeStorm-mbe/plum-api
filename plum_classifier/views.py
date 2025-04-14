@@ -1,336 +1,320 @@
+"""
+Vues pour l'application plum_classifier.
+"""
+
 from rest_framework import viewsets, status, permissions
+from api.permissions import IsAdmin, IsAgriculteur, IsTechnicien, IsConsultant, IsOwnerOrAdmin, IsVerifiedUser, RoleBasedPermission
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.parsers import MultiPartParser, FormParser
-from django.conf import settings
-import os
-import uuid
-import logging
+from django.shortcuts import get_object_or_404
+from django.db.models import Q
 from django.utils import timezone
 
-from .models import PlumClassification, PlumBatch, ModelVersion
-from .serializers import PlumClassificationSerializer, PlumBatchSerializer, ModelVersionSerializer
-from .services import PlumClassifierService
+from .models import PlumImage, ClassificationResult, BatchClassificationJob, ModelMetrics
+from .serializers import (
+    PlumImageSerializer, ClassificationResultSerializer, BatchClassificationJobSerializer,
+    ModelMetricsSerializer, ClassifyImageSerializer, BatchClassifySerializer
+)
+from .services.image_service import ImageService
+from .services.model_service import ModelService
+from api.websocket_utils import send_notification
 
-logger = logging.getLogger(__name__)
 
-class PlumClassificationViewSet(viewsets.ModelViewSet):
+class PlumImageViewSet(viewsets.ModelViewSet):
     """
-    ViewSet pour la classification des prunes.
+    ViewSet pour gérer les images de prunes.
     """
-    queryset = PlumClassification.objects.all()
-    serializer_class = PlumClassificationSerializer
-    parser_classes = (MultiPartParser, FormParser)
+    serializer_class = PlumImageSerializer
+    permission_classes = [IsVerifiedUser, RoleBasedPermission(
+        allowed_roles=['admin', 'agriculteur', 'technicien'],
+        read_roles=['consultant']
+    )]
     
     def get_queryset(self):
         """
-        Filtre les classifications en fonction de l'utilisateur connecté.
-        Les administrateurs peuvent voir toutes les classifications.
+        Retourne les images de l'utilisateur actuel ou toutes les images pour les administrateurs.
         """
         user = self.request.user
-        if user.is_staff or user.is_admin_user:
-            return PlumClassification.objects.all()
-        
-        # Les agriculteurs ne voient que leurs propres classifications
-        if user.is_farmer:
-            return PlumClassification.objects.filter(uploaded_by=user)
-        
-        # Les techniciens peuvent voir les classifications des fermes qu'ils gèrent
-        # (cette logique serait à implémenter selon les besoins spécifiques)
-        return PlumClassification.objects.filter(uploaded_by=user)
+        if user.is_admin:
+            return PlumImage.objects.all().order_by('-uploaded_at')
+        return PlumImage.objects.filter(user=user).order_by('-uploaded_at')
     
-    @action(detail=False, methods=['post'], parser_classes=[MultiPartParser])
-    def classify(self, request):
+    @action(detail=True, methods=['post'])
+    def classify(self, request, pk=None):
         """
-        Endpoint pour classifier une image de prune.
+        Classifie une image existante.
         """
-        if 'image' not in request.FILES:
-            return Response(
-                {'error': 'Aucune image fournie'},
-                status=status.HTTP_400_BAD_REQUEST
+        plum_image = self.get_object()
+        
+        try:
+            # Vérifier si l'image a déjà été classifiée
+            existing_classification = ClassificationResult.objects.filter(plum_image=plum_image).first()
+            if existing_classification:
+                serializer = ClassificationResultSerializer(
+                    existing_classification, 
+                    context={'request': request}
+                )
+                return Response(serializer.data)
+            
+            # Classifier l'image
+            result = ImageService.classify_image(plum_image)
+            
+            # Récupérer le résultat de classification
+            classification = ClassificationResult.objects.get(plum_image=plum_image)
+            serializer = ClassificationResultSerializer(
+                classification, 
+                context={'request': request}
             )
+            
+            # Envoyer une notification
+            send_notification(
+                user_id=str(request.user.id),
+                notification_type='classification',
+                title='Classification terminée',
+                message=f'Votre image a été classifiée comme {result["class_name"]} avec une confiance de {result["confidence"]:.2f}',
+                data={'classification_id': str(classification.id), 'image_id': str(plum_image.id)}
+            )
+            
+            return Response(serializer.data)
         
-        image_file = request.FILES['image']
-        farm_id = request.data.get('farm_id')
-        batch_id = request.data.get('batch_id')
-        use_tta = request.data.get('use_tta', 'false').lower() == 'true'
-        
-        # Sauvegarder l'image
-        filename = f"{uuid.uuid4()}.jpg"
-        upload_dir = os.path.join(settings.MEDIA_ROOT, 'plum_images')
-        os.makedirs(upload_dir, exist_ok=True)
-        image_path = os.path.join(upload_dir, filename)
-        
-        with open(image_path, 'wb+') as destination:
-            for chunk in image_file.chunks():
-                destination.write(chunk)
-        
-        # Classifier l'image
-        classifier = PlumClassifierService.get_instance()
-        results = classifier.classify_image(image_path, tta=use_tta)
-        
-        if 'error' in results:
+        except Exception as e:
             return Response(
-                {'error': results['error']},
+                {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+    
+    @action(detail=False, methods=['post'])
+    def classify_new(self, request):
+        """
+        Upload et classifie une nouvelle image.
+        """
+        serializer = ClassifyImageSerializer(data=request.data)
+        if serializer.is_valid():
+            try:
+                # Sauvegarder l'image
+                plum_image = ImageService.save_image(
+                    image_data=serializer.validated_data['image'],
+                    user=request.user,
+                    location=serializer.validated_data.get('location'),
+                    notes=serializer.validated_data.get('notes'),
+                    ground_truth=serializer.validated_data.get('ground_truth')
+                )
+                
+                # Classifier l'image
+                result = ImageService.classify_image(
+                    plum_image=plum_image,
+                    save_result=serializer.validated_data.get('save_result', True),
+                    send_realtime=serializer.validated_data.get('send_realtime', True)
+                )
+                
+                # Récupérer le résultat de classification
+                classification = ClassificationResult.objects.get(plum_image=plum_image)
+                result_serializer = ClassificationResultSerializer(
+                    classification, 
+                    context={'request': request}
+                )
+                
+                # Envoyer une notification
+                send_notification(
+                    user_id=str(request.user.id),
+                    notification_type='classification',
+                    title='Classification terminée',
+                    message=f'Votre image a été classifiée comme {result["class_name"]} avec une confiance de {result["confidence"]:.2f}',
+                    data={'classification_id': str(classification.id), 'image_id': str(plum_image.id)}
+                )
+                
+                return Response(result_serializer.data)
+            
+            except Exception as e:
+                return Response(
+                    {'error': str(e)},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
         
-        # Enregistrer les résultats
-        classification = PlumClassification(
-            image_path=image_path,
-            original_filename=image_file.name,
-            uploaded_by=request.user,
-            farm_id=farm_id,
-            batch_id=batch_id,
-            classification_result=results,
-            class_name=results['class_name'],
-            confidence_score=results['confidence'],
-            is_plum=results['est_prune'],
-            processing_time=results['processing_time'],
-            device_info=request.META.get('HTTP_USER_AGENT', ''),
-            geo_location=request.data.get('geo_location')
-        )
-        classification.save()
-        
-        # Retourner les résultats
-        serializer = PlumClassificationSerializer(classification)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ClassificationResultViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    ViewSet pour consulter les résultats de classification.
+    """
+    serializer_class = ClassificationResultSerializer
+    permission_classes = [IsVerifiedUser, RoleBasedPermission(
+        allowed_roles=['admin', 'agriculteur', 'technicien'],
+        read_roles=['consultant']
+    )]
+    
+    def get_queryset(self):
+        """
+        Retourne les résultats de classification de l'utilisateur actuel ou tous les résultats pour les administrateurs.
+        """
+        user = self.request.user
+        if user.is_admin:
+            return ClassificationResult.objects.all().order_by('-classified_at')
+        return ClassificationResult.objects.filter(plum_image__user=user).order_by('-classified_at')
     
     @action(detail=False, methods=['get'])
-    def stats(self, request):
+    def statistics(self, request):
         """
-        Retourne des statistiques sur les classifications.
+        Retourne des statistiques sur les classifications de l'utilisateur.
         """
         user = request.user
         queryset = self.get_queryset()
         
-        # Filtrer par période si spécifié
-        start_date = request.query_params.get('start_date')
-        end_date = request.query_params.get('end_date')
-        
-        if start_date:
-            queryset = queryset.filter(created_at__gte=start_date)
-        if end_date:
-            queryset = queryset.filter(created_at__lte=end_date)
-        
-        # Calculer les statistiques
+        # Statistiques globales
         total_count = queryset.count()
         class_counts = {}
+        for choice in PlumImage.CATEGORY_CHOICES:
+            class_counts[choice[0]] = queryset.filter(predicted_class=choice[0]).count()
         
-        for classification in queryset:
-            class_name = classification.get_class_name_display()
-            class_counts[class_name] = class_counts.get(class_name, 0) + 1
+        # Statistiques par période
+        now = timezone.now()
+        last_week = now - timezone.timedelta(days=7)
+        last_month = now - timezone.timedelta(days=30)
         
-        # Calculer les pourcentages
-        class_percentages = {}
-        for class_name, count in class_counts.items():
-            percentage = (count / total_count) * 100 if total_count > 0 else 0
-            class_percentages[class_name] = round(percentage, 2)
+        weekly_count = queryset.filter(classified_at__gte=last_week).count()
+        monthly_count = queryset.filter(classified_at__gte=last_month).count()
         
-        # Calculer la confiance moyenne
-        avg_confidence = 0
-        if total_count > 0:
-            avg_confidence = queryset.aggregate(models.Avg('confidence_score'))['confidence_score__avg']
+        # Confiance moyenne
+        avg_confidence = queryset.values_list('confidence', flat=True).aggregate(avg=models.Avg('confidence'))
         
         return Response({
-            'total_classifications': total_count,
-            'class_counts': class_counts,
-            'class_percentages': class_percentages,
-            'average_confidence': avg_confidence,
-            'period': {
-                'start_date': start_date,
-                'end_date': end_date
-            }
+            'total_count': total_count,
+            'class_distribution': class_counts,
+            'weekly_count': weekly_count,
+            'monthly_count': monthly_count,
+            'avg_confidence': avg_confidence['avg'] if avg_confidence['avg'] else 0
         })
 
 
-class PlumBatchViewSet(viewsets.ModelViewSet):
+class BatchClassificationJobViewSet(viewsets.ModelViewSet):
     """
-    ViewSet pour les lots de prunes.
+    ViewSet pour gérer les tâches de classification par lot.
     """
-    queryset = PlumBatch.objects.all()
-    serializer_class = PlumBatchSerializer
+    serializer_class = BatchClassificationJobSerializer
+    permission_classes = [IsVerifiedUser, RoleBasedPermission(
+        allowed_roles=['admin', 'agriculteur', 'technicien'],
+        read_roles=['consultant']
+    )]
     
     def get_queryset(self):
         """
-        Filtre les lots en fonction de l'utilisateur connecté.
-        Les administrateurs peuvent voir tous les lots.
+        Retourne les tâches de l'utilisateur actuel ou toutes les tâches pour les administrateurs.
         """
         user = self.request.user
-        if user.is_staff or user.is_admin_user:
-            return PlumBatch.objects.all()
-        
-        # Les agriculteurs ne voient que leurs propres lots
-        if user.is_farmer:
-            return PlumBatch.objects.filter(farm__owner=user)
-        
-        # Les techniciens peuvent voir les lots des fermes qu'ils gèrent
-        # (cette logique serait à implémenter selon les besoins spécifiques)
-        return PlumBatch.objects.filter(created_by=user)
-    
-    @action(detail=True, methods=['post'], parser_classes=[MultiPartParser])
-    def classify_batch(self, request, pk=None):
-        """
-        Endpoint pour classifier un lot d'images de prunes.
-        """
-        batch = self.get_object()
-        
-        if 'images' not in request.FILES:
-            return Response(
-                {'error': 'Aucune image fournie'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        images = request.FILES.getlist('images')
-        use_tta = request.data.get('use_tta', 'false').lower() == 'true'
-        
-        # Créer le répertoire pour les images
-        upload_dir = os.path.join(settings.MEDIA_ROOT, 'plum_images', f'batch_{batch.id}')
-        os.makedirs(upload_dir, exist_ok=True)
-        
-        # Classifier chaque image
-        classifier = PlumClassifierService.get_instance()
-        classifications = []
-        
-        for image_file in images:
-            # Sauvegarder l'image
-            filename = f"{uuid.uuid4()}.jpg"
-            image_path = os.path.join(upload_dir, filename)
-            
-            with open(image_path, 'wb+') as destination:
-                for chunk in image_file.chunks():
-                    destination.write(chunk)
-            
-            # Classifier l'image
-            results = classifier.classify_image(image_path, tta=use_tta)
-            
-            if 'error' not in results:
-                # Enregistrer les résultats
-                classification = PlumClassification(
-                    image_path=image_path,
-                    original_filename=image_file.name,
-                    uploaded_by=request.user,
-                    farm=batch.farm,
-                    batch=batch,
-                    classification_result=results,
-                    class_name=results['class_name'],
-                    confidence_score=results['confidence'],
-                    is_plum=results['est_prune'],
-                    processing_time=results['processing_time'],
-                    device_info=request.META.get('HTTP_USER_AGENT', ''),
-                    geo_location=request.data.get('geo_location')
-                )
-                classification.save()
-                classifications.append(classification)
-        
-        # Mettre à jour le résumé du lot
-        batch.update_classification_summary()
-        
-        # Retourner les résultats
-        return Response({
-            'batch_id': batch.id,
-            'total_processed': len(classifications),
-            'total_images': len(images),
-            'status': batch.status,
-            'summary': batch.classification_summary
-        }, status=status.HTTP_200_OK)
-    
-    @action(detail=True, methods=['get'])
-    def classifications(self, request, pk=None):
-        """
-        Retourne toutes les classifications d'un lot.
-        """
-        batch = self.get_object()
-        classifications = batch.classifications.all()
-        serializer = PlumClassificationSerializer(classifications, many=True)
-        return Response(serializer.data)
-
-
-class ModelVersionViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet pour les versions du modèle.
-    """
-    queryset = ModelVersion.objects.all()
-    serializer_class = ModelVersionSerializer
-    permission_classes = [permissions.IsAdminUser]
-    
-    @action(detail=True, methods=['post'])
-    def activate(self, request, pk=None):
-        """
-        Active une version spécifique du modèle.
-        """
-        model_version = self.get_object()
-        
-        # Vérifier que le fichier existe
-        if not os.path.exists(model_version.file_path):
-            return Response(
-                {'error': f"Le fichier de modèle n'existe pas: {model_version.file_path}"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Désactiver tous les modèles
-        ModelVersion.objects.all().update(is_active=False)
-        
-        # Activer le modèle sélectionné
-        model_version.is_active = True
-        model_version.save()
-        
-        # Recharger le modèle dans le service
-        classifier = PlumClassifierService.get_instance()
-        success = classifier.switch_model(model_version.id)
-        
-        if not success:
-            return Response(
-                {'error': "Impossible de charger le modèle"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-        
-        return Response({
-            'message': f"Modèle {model_version.name} v{model_version.version} activé avec succès",
-            'model_info': classifier.get_model_info()
-        })
-    
-    @action(detail=False, methods=['get'])
-    def active(self, request):
-        """
-        Retourne la version active du modèle.
-        """
-        active_model = ModelVersion.objects.filter(is_active=True).first()
-        
-        if not active_model:
-            return Response(
-                {'message': "Aucun modèle actif"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        serializer = self.get_serializer(active_model)
-        return Response(serializer.data)
+        if user.is_admin:
+            return BatchClassificationJob.objects.all().order_by('-created_at')
+        return BatchClassificationJob.objects.filter(user=user).order_by('-created_at')
     
     @action(detail=False, methods=['post'])
-    def reload(self, request):
+    def start_batch(self, request):
         """
-        Force le rechargement du modèle actif.
+        Démarre une nouvelle tâche de classification par lot.
         """
-        classifier = PlumClassifierService.get_instance()
-        success = classifier.reload_model()
+        serializer = BatchClassifySerializer(data=request.data)
+        if serializer.is_valid():
+            try:
+                # Créer la tâche de classification par lot
+                batch_job = BatchClassificationJob.objects.create(
+                    user=request.user,
+                    status=BatchClassificationJob.PENDING
+                )
+                
+                # Déterminer les images à traiter
+                if serializer.validated_data.get('all_unclassified', False):
+                    # Toutes les images non classifiées
+                    image_ids = PlumImage.objects.filter(
+                        user=request.user
+                    ).exclude(
+                        id__in=ClassificationResult.objects.values_list('plum_image_id', flat=True)
+                    ).values_list('id', flat=True)
+                else:
+                    # Images spécifiées
+                    image_ids = serializer.validated_data.get('image_ids', [])
+                
+                # Mettre à jour le nombre total d'images
+                batch_job.total_images = len(image_ids)
+                batch_job.save(update_fields=['total_images'])
+                
+                # Démarrer le traitement (dans un thread séparé ou une tâche asynchrone)
+                # Note: Dans une implémentation réelle, cela serait fait avec Celery ou un autre système de tâches
+                # Pour cet exemple, nous allons simplement appeler la méthode directement
+                ImageService.process_batch(batch_job)
+                
+                # Retourner la tâche créée
+                serializer = BatchClassificationJobSerializer(
+                    batch_job, 
+                    context={'request': request}
+                )
+                return Response(serializer.data)
+            
+            except Exception as e:
+                return Response(
+                    {'error': str(e)},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
         
-        if not success:
-            return Response(
-                {'error': "Impossible de recharger le modèle"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-        
-        return Response({
-            'message': "Modèle rechargé avec succès",
-            'model_info': classifier.get_model_info()
-        })
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ModelMetricsViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    ViewSet pour consulter les métriques du modèle.
+    """
+    serializer_class = ModelMetricsSerializer
+    queryset = ModelMetrics.objects.all().order_by('-deployed_at')
+    permission_classes = [IsAdmin]
     
     @action(detail=False, methods=['get'])
-    def info(self, request):
+    def current(self, request):
         """
-        Retourne des informations sur le modèle chargé.
+        Retourne les métriques du modèle actuel.
         """
-        classifier = PlumClassifierService.get_instance()
-        model_info = classifier.get_model_info()
+        model_service = ModelService()
+        model_info = model_service.get_model_info()
         
-        return Response(model_info)
+        # Récupérer les métriques du modèle en base de données
+        latest_metrics = ModelMetrics.objects.order_by('-deployed_at').first()
+        
+        if latest_metrics:
+            serializer = ModelMetricsSerializer(latest_metrics)
+            metrics_data = serializer.data
+        else:
+            metrics_data = {}
+        
+        # Combiner avec les informations du modèle chargé
+        response_data = {
+            **model_info,
+            **metrics_data
+        }
+        
+        return Response(response_data)
+    
+    @action(detail=False, methods=['post'])
+    def reload_model(self, request):
+        """
+        Recharge le modèle à partir du fichier .pt.
+        """
+        if not request.user.is_admin:
+            return Response(
+                {'error': 'Seuls les administrateurs peuvent recharger le modèle'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        try:
+            model_service = ModelService()
+            success = model_service.reload_model()
+            
+            if success:
+                return Response({'status': 'Modèle rechargé avec succès'})
+            else:
+                return Response(
+                    {'error': 'Échec du rechargement du modèle'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+        
+        except Exception as e:
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

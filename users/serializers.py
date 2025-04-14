@@ -1,127 +1,192 @@
-from rest_framework import serializers
+"""
+Sérialiseurs pour l'authentification JWT.
+"""
+
 from django.contrib.auth import get_user_model
-from users.models import Farm, UserSettings
+from django.contrib.auth.password_validation import validate_password
+from django.utils.translation import gettext_lazy as _
+from rest_framework import serializers
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from django.utils import timezone
+from datetime import timedelta
+import uuid
+
+from users.models import EmailVerificationToken
+from users.services import EmailService
 
 User = get_user_model()
 
-class UserSerializer(serializers.ModelSerializer):
+
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     """
-    Serializer for the custom User model.
+    Sérialiseur personnalisé pour les tokens JWT avec des informations supplémentaires.
     """
-    password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
-    confirm_password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
+    
+    @classmethod
+    def get_token(cls, user):
+        """
+        Ajoute des claims personnalisés au token JWT.
+        """
+        token = super().get_token(user)
+        
+        # Ajouter des claims personnalisés
+        token['email'] = user.email
+        token['role'] = user.role
+        token['full_name'] = user.get_full_name()
+        token['is_verified'] = user.email_verified
+        
+        return token
+    
+    def validate(self, attrs):
+        """
+        Vérifie que l'utilisateur est actif et que son email est vérifié.
+        """
+        data = super().validate(attrs)
+        
+        # Vérifier si l'email est vérifié
+        if not self.user.email_verified:
+            raise serializers.ValidationError(
+                _("Votre email n'a pas été vérifié. Veuillez vérifier votre boîte de réception.")
+            )
+        
+        # Ajouter des informations supplémentaires à la réponse
+        data['user'] = {
+            'id': str(self.user.id),
+            'email': self.user.email,
+            'full_name': self.user.get_full_name(),
+            'role': self.user.role,
+            'is_verified': self.user.email_verified
+        }
+        
+        return data
+
+
+class RegisterSerializer(serializers.ModelSerializer):
+    """
+    Sérialiseur pour l'inscription des utilisateurs.
+    """
+    password = serializers.CharField(
+        write_only=True, required=True, validators=[validate_password]
+    )
+    password2 = serializers.CharField(write_only=True, required=True)
     
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'password', 'confirm_password', 'first_name', 
-                  'last_name', 'role', 'phone_number', 'profile_image', 'organization', 
-                  'address', 'created_at', 'updated_at')
-        read_only_fields = ('id', 'created_at', 'updated_at')
+        fields = ('email', 'password', 'password2', 'first_name', 'last_name', 'role', 'phone_number')
         extra_kwargs = {
-            'password': {'write_only': True}
+            'first_name': {'required': True},
+            'last_name': {'required': True},
+            'email': {'required': True}
         }
     
-    def validate(self, data):
+    def validate(self, attrs):
         """
-        Check that the passwords match.
+        Vérifie que les mots de passe correspondent.
         """
-        if data.get('password') != data.get('confirm_password'):
-            raise serializers.ValidationError({"confirm_password": "Passwords don't match."})
-        return data
+        if attrs['password'] != attrs['password2']:
+            raise serializers.ValidationError(
+                {"password": _("Les mots de passe ne correspondent pas.")}
+            )
+        
+        return attrs
     
     def create(self, validated_data):
         """
-        Create and return a new user with encrypted password.
+        Crée un nouvel utilisateur avec les données validées.
         """
-        # Remove confirm_password from the data
-        validated_data.pop('confirm_password', None)
+        # Supprimer le champ password2
+        validated_data.pop('password2')
         
-        # Create the user
-        user = User.objects.create_user(
-            username=validated_data['username'],
+        # Créer l'utilisateur
+        user = User.objects.create(
             email=validated_data['email'],
-            password=validated_data['password'],
-            first_name=validated_data.get('first_name', ''),
-            last_name=validated_data.get('last_name', ''),
-            role=validated_data.get('role', 'farmer'),
-            phone_number=validated_data.get('phone_number', None),
-            organization=validated_data.get('organization', None),
-            address=validated_data.get('address', None),
+            first_name=validated_data['first_name'],
+            last_name=validated_data['last_name'],
+            role=validated_data.get('role', User.AGRICULTEUR),
+            phone_number=validated_data.get('phone_number', ''),
+            is_active=True,
+            email_verified=False  # L'email doit être vérifié
         )
         
-        # Create default user settings
-        UserSettings.objects.create(user=user)
+        user.set_password(validated_data['password'])
+        user.save()
+        
+        # Créer un token de vérification d'email
+        token = EmailVerificationToken.objects.create(
+            user=user,
+            token=uuid.uuid4(),
+            expires_at=timezone.now() + timedelta(days=1)
+        )
+        
+        # Construire l'URL de vérification (à adapter selon l'environnement)
+        verification_url = f"/api/users/verify-email/{token.token}/"
+        
+        # Envoyer l'email de vérification
+        EmailService.send_verification_email(user, verification_url)
         
         return user
+
+
+class VerifyEmailSerializer(serializers.Serializer):
+    """
+    Sérialiseur pour la vérification d'email.
+    """
+    token = serializers.UUIDField(required=True)
     
-    def update(self, instance, validated_data):
+    def validate_token(self, value):
         """
-        Update and return an existing user.
+        Vérifie que le token existe, n'est pas expiré et n'a pas déjà été utilisé.
         """
-        # Remove password and confirm_password from the data if not provided
-        password = validated_data.pop('password', None)
-        validated_data.pop('confirm_password', None)
+        try:
+            token = EmailVerificationToken.objects.get(token=value)
+        except EmailVerificationToken.DoesNotExist:
+            raise serializers.ValidationError(_("Token invalide."))
         
-        # Update the user fields
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
+        if token.is_expired:
+            raise serializers.ValidationError(_("Token expiré."))
         
-        # Update password if provided
-        if password:
-            instance.set_password(password)
+        if token.is_used:
+            raise serializers.ValidationError(_("Token déjà utilisé."))
         
-        instance.save()
-        return instance
+        return value
 
 
-class FarmSerializer(serializers.ModelSerializer):
+class PasswordResetRequestSerializer(serializers.Serializer):
     """
-    Serializer for the Farm model.
+    Sérialiseur pour la demande de réinitialisation de mot de passe.
     """
-    owner_username = serializers.ReadOnlyField(source='owner.username')
+    email = serializers.EmailField(required=True)
     
-    class Meta:
-        model = Farm
-        fields = ('id', 'name', 'location', 'size', 'owner', 'owner_username', 
-                  'description', 'latitude', 'longitude', 'created_at', 'updated_at')
-        read_only_fields = ('id', 'owner', 'owner_username', 'created_at', 'updated_at')
+    def validate_email(self, value):
+        """
+        Vérifie que l'email correspond à un utilisateur existant.
+        """
+        try:
+            User.objects.get(email=value)
+        except User.DoesNotExist:
+            # Pour des raisons de sécurité, ne pas révéler si l'email existe ou non
+            pass
+        
+        return value
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    """
+    Sérialiseur pour la confirmation de réinitialisation de mot de passe.
+    """
+    token = serializers.UUIDField(required=True)
+    password = serializers.CharField(
+        write_only=True, required=True, validators=[validate_password]
+    )
+    password2 = serializers.CharField(write_only=True, required=True)
     
-    def create(self, validated_data):
+    def validate(self, attrs):
         """
-        Create and return a new farm, setting the owner to the current user.
+        Vérifie que les mots de passe correspondent et que le token est valide.
         """
-        validated_data['owner'] = self.context['request'].user
-        return super().create(validated_data)
-
-
-class UserSettingsSerializer(serializers.ModelSerializer):
-    """
-    Serializer for the UserSettings model.
-    """
-    class Meta:
-        model = UserSettings
-        fields = ('id', 'user', 'notification_preferences', 'ui_preferences', 
-                  'language', 'created_at', 'updated_at')
-        read_only_fields = ('id', 'user', 'created_at', 'updated_at')
-    
-    def create(self, validated_data):
-        """
-        Create and return user settings, setting the user to the current user.
-        """
-        validated_data['user'] = self.context['request'].user
-        return super().create(validated_data)
-
-
-class UserProfileSerializer(serializers.ModelSerializer):
-    """
-    Serializer for user profile information.
-    """
-    farms = FarmSerializer(many=True, read_only=True)
-    settings = UserSettingsSerializer(read_only=True)
-    
-    class Meta:
-        model = User
-        fields = ('id', 'username', 'email', 'first_name', 'last_name', 'role', 
-                  'phone_number', 'profile_image', 'organization', 'address', 
-                  'farms', 'settings', 'created_at', 'updated_at')
-        read_only_fields = ('id', 'username', 'email', 'role', 'created_at', 'updated_at')
+        if attrs['password'] != attrs['password2']:
+            raise serializers.ValidationError(
+                {"password": _("Les mots de passe ne correspondent pas.")}
+            )
+        
+        return attrs

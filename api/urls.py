@@ -1,29 +1,28 @@
+"""
+Configuration des URLs pour l'application api.
+"""
+
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
-from plum_classifier.views import (
-    PlumClassificationViewSet,
-    PlumBatchViewSet,
-    ModelVersionViewSet
+from .views import (
+    ApiKeyViewSet,
+    ApiLogViewSet,
+    NotificationViewSet,
+    FeedbackViewSet,
+    DashboardViewSet
 )
-from users.views import UserViewSet, FarmViewSet
+
+app_name = 'api'
 
 # Créer un routeur pour les ViewSets
 router = DefaultRouter()
-router.register(r'classifications', PlumClassificationViewSet, basename='classification')
-router.register(r'batches', PlumBatchViewSet, basename='batch')
-router.register(r'models', ModelVersionViewSet, basename='model')
-
-# Documentation Swagger/OpenAPI est configurée dans plum_project.urls
+router.register(r'api-keys', ApiKeyViewSet, basename='api_key')
+router.register(r'api-logs', ApiLogViewSet, basename='api_log')
+router.register(r'notifications', NotificationViewSet, basename='notification')
+router.register(r'feedbacks', FeedbackViewSet, basename='feedback')
+router.register(r'dashboard', DashboardViewSet, basename='dashboard')
 
 urlpatterns = [
-    # Inclure les routes générées automatiquement
     path('', include(router.urls)),
-    
-    # Inclure les routes d'authentification
-    path('auth/', include('authentication.urls')),
-    
-    # Inclure les routes spécifiques au classificateur de prunes
-    path('plum-classifier/', include('plum_classifier.urls')),
-    path('users/' ,include('users.urls'))
 ]

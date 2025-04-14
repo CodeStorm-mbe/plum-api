@@ -1,90 +1,151 @@
+"""
+Sérialiseurs pour l'application plum_classifier.
+"""
+
 from rest_framework import serializers
-from .models import PlumBatch, PlumClassification, Notification, ModelVersion
-from users.serializers import UserSerializer, FarmSerializer
+from django.contrib.auth import get_user_model
+from .models import PlumImage, ClassificationResult, BatchClassificationJob, ModelMetrics
 
-class PlumClassificationSerializer(serializers.ModelSerializer):
+User = get_user_model()
+
+
+class PlumImageSerializer(serializers.ModelSerializer):
     """
-    Serializer pour le modèle PlumClassification.
+    Sérialiseur pour le modèle PlumImage.
     """
-    uploaded_by_details = UserSerializer(source='uploaded_by', read_only=True)
-    farm_details = FarmSerializer(source='farm', read_only=True)
-    class_name_display = serializers.CharField(source='get_class_name_display', read_only=True)
+    user_email = serializers.EmailField(source='user.email', read_only=True)
+    image_url = serializers.SerializerMethodField()
     
     class Meta:
-        model = PlumClassification
-        fields = ('id', 'image_path', 'original_filename', 'uploaded_by', 'uploaded_by_details',
-                  'farm', 'farm_details', 'batch', 'classification_result', 'class_name',
-                  'class_name_display', 'confidence_score', 'is_plum', 'processing_time',
-                  'device_info', 'geo_location', 'created_at')
-        read_only_fields = ('id', 'uploaded_by', 'uploaded_by_details', 'created_at')
+        model = PlumImage
+        fields = [
+            'id', 'user', 'user_email', 'image', 'image_url', 'uploaded_at',
+            'location', 'notes', 'ground_truth'
+        ]
+        read_only_fields = ['id', 'user', 'user_email', 'uploaded_at']
+    
+    def get_image_url(self, obj):
+        """
+        Récupère l'URL de l'image.
+        """
+        request = self.context.get('request')
+        if obj.image and hasattr(obj.image, 'url') and request:
+            return request.build_absolute_uri(obj.image.url)
+        return None
     
     def create(self, validated_data):
         """
-        Crée une nouvelle classification en définissant l'utilisateur qui l'a téléchargée.
+        Crée une nouvelle instance de PlumImage avec l'utilisateur actuel.
         """
-        validated_data['uploaded_by'] = self.context['request'].user
+        request = self.context.get('request')
+        validated_data['user'] = request.user
         return super().create(validated_data)
 
 
-class PlumBatchSerializer(serializers.ModelSerializer):
+class ClassificationResultSerializer(serializers.ModelSerializer):
     """
-    Serializer pour le modèle PlumBatch.
+    Sérialiseur pour le modèle ClassificationResult.
     """
-    farm_details = FarmSerializer(source='farm', read_only=True)
-    created_by_details = UserSerializer(source='created_by', read_only=True)
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
-    classifications_count = serializers.SerializerMethodField()
+    plum_image_url = serializers.SerializerMethodField()
+    probabilities = serializers.SerializerMethodField()
     
     class Meta:
-        model = PlumBatch
-        fields = ('id', 'name', 'description', 'farm', 'farm_details', 'created_by',
-                  'created_by_details', 'status', 'status_display', 'classification_summary',
-                  'total_plums', 'quality_distribution', 'classifications_count',
-                  'created_at', 'updated_at')
-        read_only_fields = ('id', 'created_by', 'created_by_details', 'classification_summary',
-                           'total_plums', 'quality_distribution', 'created_at', 'updated_at')
+        model = ClassificationResult
+        fields = [
+            'id', 'plum_image', 'plum_image_url', 'predicted_class', 'confidence',
+            'is_plum', 'probabilities', 'classified_at', 'model_version', 'processing_time'
+        ]
+        read_only_fields = ['id', 'plum_image', 'plum_image_url', 'predicted_class', 'confidence',
+                           'is_plum', 'probabilities', 'classified_at', 'model_version', 'processing_time']
     
-    def get_classifications_count(self, obj):
+    def get_plum_image_url(self, obj):
         """
-        Retourne le nombre de classifications dans ce lot.
+        Récupère l'URL de l'image de prune.
         """
-        return obj.classifications.count()
+        request = self.context.get('request')
+        if obj.plum_image and obj.plum_image.image and hasattr(obj.plum_image.image, 'url') and request:
+            return request.build_absolute_uri(obj.plum_image.image.url)
+        return None
+    
+    def get_probabilities(self, obj):
+        """
+        Récupère les probabilités pour chaque classe.
+        """
+        return {
+            'bonne_qualite': obj.prob_bonne_qualite,
+            'non_mure': obj.prob_non_mure,
+            'tachetee': obj.prob_tachetee,
+            'fissuree': obj.prob_fissuree,
+            'meurtrie': obj.prob_meurtrie,
+            'pourrie': obj.prob_pourrie
+        }
+
+
+class BatchClassificationJobSerializer(serializers.ModelSerializer):
+    """
+    Sérialiseur pour le modèle BatchClassificationJob.
+    """
+    user_email = serializers.EmailField(source='user.email', read_only=True)
+    
+    class Meta:
+        model = BatchClassificationJob
+        fields = [
+            'id', 'user', 'user_email', 'created_at', 'updated_at', 'status',
+            'total_images', 'processed_images', 'success_count', 'error_count',
+            'report_file', 'progress_percentage'
+        ]
+        read_only_fields = ['id', 'user', 'user_email', 'created_at', 'updated_at',
+                           'status', 'total_images', 'processed_images', 'success_count',
+                           'error_count', 'report_file', 'progress_percentage']
     
     def create(self, validated_data):
         """
-        Crée un nouveau lot en définissant l'utilisateur qui l'a créé.
+        Crée une nouvelle instance de BatchClassificationJob avec l'utilisateur actuel.
         """
-        validated_data['created_by'] = self.context['request'].user
+        request = self.context.get('request')
+        validated_data['user'] = request.user
         return super().create(validated_data)
 
 
-class NotificationSerializer(serializers.ModelSerializer):
+class ModelMetricsSerializer(serializers.ModelSerializer):
     """
-    Serializer pour le modèle Notification.
-    """
-    class Meta:
-        model = Notification
-        fields = ('id', 'user', 'title', 'message', 'type', 'is_read',
-                  'content_type', 'object_id', 'created_at')
-        read_only_fields = ('id', 'created_at')
-    
-    def create(self, validated_data):
-        """
-        Crée une nouvelle notification en définissant l'utilisateur si non spécifié.
-        """
-        if 'user' not in validated_data:
-            validated_data['user'] = self.context['request'].user
-        return super().create(validated_data)
-
-
-class ModelVersionSerializer(serializers.ModelSerializer):
-    """
-    Serializer pour le modèle ModelVersion.
+    Sérialiseur pour le modèle ModelMetrics.
     """
     class Meta:
-        model = ModelVersion
-        fields = ('id', 'name', 'version', 'file_path', 'metadata_path', 'model_type',
-                  'num_classes', 'input_shape', 'confidence_threshold', 'accuracy',
-                  'f1_score', 'precision', 'recall', 'training_date', 'training_duration',
-                  'dataset_size', 'is_active', 'is_production', 'created_at', 'updated_at')
-        read_only_fields = ('id', 'created_at', 'updated_at')
+        model = ModelMetrics
+        fields = [
+            'id', 'model_version', 'deployed_at', 'accuracy', 'precision',
+            'recall', 'f1_score', 'class_metrics', 'confusion_matrix',
+            'total_predictions', 'avg_confidence', 'avg_processing_time'
+        ]
+        read_only_fields = ['id', 'model_version', 'deployed_at', 'accuracy',
+                           'precision', 'recall', 'f1_score', 'class_metrics',
+                           'confusion_matrix', 'total_predictions', 'avg_confidence',
+                           'avg_processing_time']
+
+
+class ClassifyImageSerializer(serializers.Serializer):
+    """
+    Sérialiseur pour la classification d'une image.
+    """
+    image = serializers.ImageField(required=True)
+    location = serializers.CharField(required=False, allow_blank=True)
+    notes = serializers.CharField(required=False, allow_blank=True)
+    ground_truth = serializers.ChoiceField(
+        choices=PlumImage.CATEGORY_CHOICES,
+        required=False,
+        allow_blank=True
+    )
+    save_result = serializers.BooleanField(default=True)
+    send_realtime = serializers.BooleanField(default=True)
+
+
+class BatchClassifySerializer(serializers.Serializer):
+    """
+    Sérialiseur pour la classification par lot.
+    """
+    image_ids = serializers.ListField(
+        child=serializers.UUIDField(),
+        required=False
+    )
+    all_unclassified = serializers.BooleanField(default=False)
