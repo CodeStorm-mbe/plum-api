@@ -263,7 +263,7 @@ SPECTACULAR_SETTINGS = {
 }
 
 AUTHENTICATION_BACKENDS = [
-    'users.authentication.EmailOrUsernameModelBackend',
+    'users.authentification.EmailOrUsernameModelBackend',
     'django.contrib.auth.backends.ModelBackend',  # Gardez le backend par défaut en secours
 ]
 
