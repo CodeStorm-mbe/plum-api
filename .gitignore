@@ -25,7 +25,7 @@ static/*
 staticfiles/
 
 # Fichiers de modèle
-models/*
+# models/*
 !models/.gitkeep
 
 # Logs
