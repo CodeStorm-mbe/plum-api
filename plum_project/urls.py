@@ -24,6 +24,9 @@ urlpatterns = [
     # Endpoint du schéma OpenAPI
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
 
+    path('api/dashboard/', include('dashboard.urls')),
+
+
     # Swagger UI
     path('', SpectacularSwaggerView.as_view(url_name='schema'), name='schema-swagger-ui'),
     path('swagger/', SpectacularSwaggerView.as_view(url_name='schema'), name='schema-swagger-ui-alt'),
