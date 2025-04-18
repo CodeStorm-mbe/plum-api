@@ -1,19 +1,15 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
+from . import views
 
-from .views import DashboardViewSet, DashboardPreferenceViewSet
-
-# Créer un routeur pour les ViewSets
 router = DefaultRouter()
-router.register(r'preferences', DashboardPreferenceViewSet, basename='dashboard-preference')
+router.register(r'preferences', views.DashboardPreferenceViewSet, basename='dashboard-preferences')
+router.register(r'analytics', views.DashboardAnalyticsViewSet, basename='dashboard-analytics')
 
 urlpatterns = [
-    # Inclure les routes générées automatiquement
     path('', include(router.urls)),
-    
-    # Routes spécifiques pour les dashboards
-    path('user/', DashboardViewSet.as_view({'get': 'user_dashboard'}), name='user-dashboard'),
-    path('admin/', DashboardViewSet.as_view({'get': 'admin_dashboard'}), name='admin-dashboard'),
-    path('technician/', DashboardViewSet.as_view({'get': 'technician_dashboard'}), name='technician-dashboard'),
-    path('farmer/', DashboardViewSet.as_view({'get': 'farmer_dashboard'}), name='farmer-dashboard'),
+    path('user/', views.DashboardViewSet.as_view({'get': 'user_dashboard'}), name='user-dashboard'),
+    path('admin/', views.DashboardViewSet.as_view({'get': 'admin_dashboard'}), name='admin-dashboard'),
+    path('technician/', views.DashboardViewSet.as_view({'get': 'technician_dashboard'}), name='technician-dashboard'),
+    path('farmer/', views.DashboardViewSet.as_view({'get': 'farmer_dashboard'}), name='farmer-dashboard'),
 ]

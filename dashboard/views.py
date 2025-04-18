@@ -12,8 +12,15 @@ from .serializers import (
     DashboardPreferenceSerializer,
     AdminDashboardSerializer,
     TechnicianDashboardSerializer,
-    FarmerDashboardSerializer
+    FarmerDashboardSerializer,
+    TimeSeriesDataSerializer,
+    QualityTrendSerializer,
+    FarmComparisonSerializer,
+    QualityPredictionSerializer,
+    ActivityHeatmapSerializer,
+    ClassificationAccuracySerializer
 )
+from .analytics import DashboardAnalytics
 from users.models import User, Farm
 from plum_classifier.models import PlumClassification, PlumBatch, ModelVersion
 from plum_classifier.serializers import PlumClassificationSerializer
@@ -354,3 +361,111 @@ class DashboardPreferenceViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+
+class DashboardAnalyticsViewSet(viewsets.ViewSet):
+    """
+    ViewSet pour les analyses avancées du dashboard.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    
+    @action(detail=False, methods=['get'])
+    def quality_trends(self, request):
+        """
+        Retourne les tendances de qualité au fil du temps.
+        """
+        farm_id = request.query_params.get('farm_id')
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+        period = request.query_params.get('period', 'week')
+        
+        trends = DashboardAnalytics.get_quality_trends(
+            farm_id=farm_id, 
+            start_date=start_date, 
+            end_date=end_date, 
+            period=period
+        )
+        
+        return Response(trends)
+    
+    @action(detail=False, methods=['get'])
+    def farm_comparison(self, request):
+        """
+        Retourne une comparaison des performances des fermes.
+        """
+        user = request.user
+        user_id = None
+        
+        # Si l'utilisateur est un agriculteur, filtrer par ses fermes
+        if user.is_farmer:
+            user_id = user.id
+            
+        metric = request.query_params.get('metric', 'quality_score')
+        
+        comparison = DashboardAnalytics.get_farm_comparison(
+            user_id=user_id,
+            metric=metric
+        )
+        
+        return Response(comparison)
+    
+    @action(detail=False, methods=['get'])
+    def quality_prediction(self, request):
+        """
+        Retourne une prédiction de la distribution de qualité future.
+        """
+        farm_id = request.query_params.get('farm_id')
+        days_ahead = int(request.query_params.get('days_ahead', 7))
+        
+        prediction = DashboardAnalytics.predict_quality_distribution(
+            farm_id=farm_id,
+            days_ahead=days_ahead
+        )
+        
+        return Response(prediction)
+    
+    @action(detail=False, methods=['get'])
+    def activity_heatmap(self, request):
+        """
+        Retourne un heatmap d'activité utilisateur.
+        """
+        days = int(request.query_params.get('days', 30))
+        
+        heatmap = DashboardAnalytics.get_user_activity_heatmap(days=days)
+        
+        return Response(heatmap)
+    
+    @action(detail=False, methods=['get'])
+    def classification_accuracy(self, request):
+        """
+        Retourne des métriques d'exactitude pour les classifications.
+        """
+        model_version_id = request.query_params.get('model_version_id')
+        
+        metrics = DashboardAnalytics.get_classification_accuracy_metrics(
+            model_version_id=model_version_id
+        )
+        
+        return Response(metrics)
+    
+    @action(detail=False, methods=['get'])
+    def time_series_data(self, request):
+        """
+        Retourne des données de séries temporelles pour un queryset spécifié.
+        """
+        # Cette méthode est un exemple et nécessiterait plus de paramètres
+        # pour être vraiment utile dans une API réelle
+        
+        period = request.query_params.get('period', 'day')
+        farm_id = request.query_params.get('farm_id')
+        
+        queryset = PlumClassification.objects.all()
+        if farm_id:
+            queryset = queryset.filter(farm_id=farm_id)
+            
+        data = DashboardAnalytics.get_time_series_data(
+            queryset=queryset,
+            period=period
+        )
+        
+        return Response(data)

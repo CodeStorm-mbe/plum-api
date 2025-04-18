@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt.token_blacklist',  # For token blacklisting on logout
     'corsheaders',
     'drf_spectacular',
+    'django_filters',  # Ajout pour le filtrage avancé
     
     # Custom apps
     'users',
@@ -68,6 +69,19 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+
+# Paramètres de sécurité supplémentaires
+if not DEBUG:
+    # En production uniquement
+    SECURE_HSTS_SECONDS = 31536000  # 1 an
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = 'DENY'
 
 ROOT_URLCONF = 'plum_project.urls'
 
@@ -92,51 +106,53 @@ WSGI_APPLICATION = 'plum_project.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-# if os.environ.get("DB_ENGINE") == "django.db.backends.sqlite3":
-#     DATABASES = {
-#         "default": {
-#             "ENGINE": "django.db.backends.sqlite3",
-#             "NAME": os.environ.get("DB_NAME"),
-#         }
-#     }
-# else:
-# DATABASES = {
-#     "default": dj_database_url.config(default=os.environ.get("DATABASE_URL"))
-# }
-
+# Configuration de la base de données via DATABASE_URL
 DATABASES = {
-    'default': dj_database_url.parse(
-        " postgresql://plum_user:4dEQpEcvQBqaDvqkEuTZt7eAub0Gx1CE@dpg-cvtrm9adbo4c7399t45g-a.frankfurt-postgres.render.com/plum_db_y85q"
+    "default": dj_database_url.config(
+        default=os.getenv("DATABASE_URL"),
+        conn_max_age=600,
+        conn_health_checks=True,
     )
 }
 
 
 # Cache configuration
-# CACHES = {
-#     'default': {
-#         'BACKEND': 'django_redis.cache.RedisCache',
-#         'LOCATION': os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/1'),
-#         'OPTIONS': {
-#             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-#         }
-#     }
-# }
-
-# Désactiver le cache Redis
-CACHES = {
-    "default": {
-        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-        "LOCATION": "unique-snowflake",
+if os.getenv('REDIS_URL'):
+    CACHES = {
+        'default': {
+            'BACKEND': 'django_redis.cache.RedisCache',
+            'LOCATION': os.getenv('REDIS_URL'),
+            'OPTIONS': {
+                'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+                'IGNORE_EXCEPTIONS': True,  # Ignorer les erreurs Redis pour éviter les pannes
+            },
+            'KEY_PREFIX': 'plum_api'
+        }
     }
-}
+else:
+    # Utiliser le cache en mémoire si Redis n'est pas configuré
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "plum_api_cache",
+        }
+    }
 
-# # Celery configuration
-# CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://127.0.0.1:6379/0')
-# CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://127.0.0.1:6379/0')
-# CELERY_ACCEPT_CONTENT = ['json']
-# CELERY_TASK_SERIALIZER = 'json'
-# CELERY_RESULT_SERIALIZER = 'json'
-# CELERY_TIMEZONE = 'UTC'
+# Celery configuration
+if os.getenv('CELERY_BROKER_URL'):
+    CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL')
+    CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', CELERY_BROKER_URL)
+    CELERY_ACCEPT_CONTENT = ['json']
+    CELERY_TASK_SERIALIZER = 'json'
+    CELERY_RESULT_SERIALIZER = 'json'
+    CELERY_TIMEZONE = 'UTC'
+    
+    # Paramètres de sécurité pour Celery
+    CELERY_SECURITY_KEY = os.getenv('CELERY_SECURITY_KEY', SECRET_KEY)
+    CELERY_TASK_ACKS_LATE = True
+    CELERY_TASK_REJECT_ON_WORKER_LOST = True
+    CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
+    CELERY_WORKER_MAX_TASKS_PER_CHILD = 1000
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
@@ -147,6 +163,9 @@ AUTH_PASSWORD_VALIDATORS = [
     },
     {
         'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        'OPTIONS': {
+            'min_length': 8,  # Augmentation de la longueur minimale
+        }
     },
     {
         'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
@@ -182,6 +201,10 @@ STATICFILES_STORAGE = "django.contrib.staticfiles.storage.ManifestStaticFilesSto
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
+# Limites pour les uploads de fichiers
+MAX_UPLOAD_SIZE = int(os.getenv('MAX_UPLOAD_SIZE', 5242880))  # 5MB par défaut
+ALLOWED_IMAGE_FORMATS = os.getenv('ALLOWED_IMAGE_FORMATS', 'jpg,jpeg,png,webp').split(',')
+
 # Model files directory
 MODEL_DIR = os.path.join(BASE_DIR, 'models')
 os.makedirs(MODEL_DIR, exist_ok=True)
@@ -211,6 +234,11 @@ REST_FRAMEWORK = {
     },
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'EXCEPTION_HANDLER': 'api.exception_handler.custom_exception_handler',
+    'DEFAULT_FILTER_BACKENDS': [
+        'django_filters.rest_framework.DjangoFilterBackend',
+        'rest_framework.filters.SearchFilter',
+        'rest_framework.filters.OrderingFilter',
+    ],
 }
 
 # JWT settings
@@ -230,10 +258,12 @@ SIMPLE_JWT = {
 }
 
 # CORS settings
-# CORS_ALLOW_ALL_ORIGINS = DEBUG
-# CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000').split(',')
-# CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_ALL_ORIGINS = True
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
+else:
+    CORS_ALLOW_ALL_ORIGINS = False
+    CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000').split(',')
+    CORS_ALLOW_CREDENTIALS = os.getenv('CORS_ALLOW_CREDENTIALS', 'True') == 'True'
 
 # Swagger settings
 SWAGGER_SETTINGS = {
@@ -280,6 +310,9 @@ DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@plumclassifier.com
 
 # Frontend URL for email links
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+
+# Paramètres du modèle de classification
+MODEL_CONFIDENCE_THRESHOLD = float(os.getenv('MODEL_CONFIDENCE_THRESHOLD', 0.7))
 
 # Logging configuration
 LOGGING = {
