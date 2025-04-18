@@ -49,7 +49,6 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt.token_blacklist',  # For token blacklisting on logout
     'corsheaders',
     'drf_spectacular',
-    'django_filters',
     'django_filters',  # Ajout pour le filtrage avancé
     
     # Custom apps
